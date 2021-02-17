@@ -1,0 +1,5 @@
+- name: SET UP NGINX
+  import_playbook: nginx.yaml
+
+- name: SET UP PM2 & NODEJS 
+  import_playbook: nodejs.yaml

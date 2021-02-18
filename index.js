@@ -60,10 +60,17 @@ app.post("/", async (req, res) => {
         })
 
         if (applicationType === "dev" && provider === "gcp" && projectArchitecture === "micro") {
-            let { stdout: output } = await exec(`make terraform-apply-google RESOURCE_NAME=${resourceName}`)
-            console.log(output)
+            try {
+                let { stdout: output } = await exec(`make terraform-apply-google RESOURCE_NAME=${resourceName}`)
+                console.log(output)
+            } catch (error) {
+                console.error(error.message)
+                let { stdout: output } = await exec(`cd terraform/google && terraform destroy -auto-approve -state=${resourceName}.tfstate`)
+                console.log(output)
+            } finally {
+                await exec(`rm terraform/google/${resourceName}*`)
+            }
 
-            await exec(`rm terraform/google/${resourceName}*`)
 
             return res.send(instance)
         } else {

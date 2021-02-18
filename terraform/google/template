@@ -45,7 +45,7 @@ resource "google_compute_instance_template" "RESOURCE_NAME_instance_template" {
     type = "ssh"
     host = self.network_interface.0.access_config.0.nat_ip
     user = "dmouhammad"
-    private_key = file("~/.ssh/google_compute_engine")
+    private_key = file("${var.private_key}")
   }
 
   provisioner "remote-exec" {

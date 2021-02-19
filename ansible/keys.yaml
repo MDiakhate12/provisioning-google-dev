@@ -1,0 +1,8 @@
+---
+- hosts: all
+  tasks:
+  - name: Set public key
+    authorized_key:
+      state: present
+      user: dmouhammad
+      key: "{{ lookup('file', public_key) }}"

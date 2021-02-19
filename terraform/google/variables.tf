@@ -1,6 +1,6 @@
 variable "vm_group_name" {
   type    = string
-  default = "diaf"
+  default = "bro"
 }
 
 variable "number_of_vm" {
@@ -43,9 +43,18 @@ variable "disk_size_gb" {
   default = 10
 }
 
+variable "user" {
+  type    = string
+  default = "dmouhammad"
+}
 variable "private_key" {
   type    = string
   default = "~/.ssh/google_compute_engine"
+}
+
+variable "public_key" {
+  type    = string
+  default = "~/.ssh/google_compute_engine.pub"
 }
 
 variable "application_type" {

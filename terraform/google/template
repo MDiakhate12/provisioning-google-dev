@@ -2,24 +2,12 @@ provider "google" {
   project = "ept-project-301112"
 }
 
-resource "google_compute_firewall" "RESOURCE_NAME_firewall" {
-  name    = "${var.vm_group_name}-firewall"
-  network = "default"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["80", "8080"]
-  }
-
-  source_tags = ["web"]
-}
-
 // INTANCE TEMPLATE
 resource "google_compute_instance_template" "RESOURCE_NAME_instance_template" {
-  name             = "${var.vm_group_name}-instance-template"
+  name_prefix                    = "${var.vm_group_name}-instance-template-"
   machine_type            = "custom-${var.cpu}-${var.memory}"
   region                  = var.region
-  // metadata_startup_script = "apt update -y && apt install nginx -y"
+  metadata_startup_script = file("./web/install.sh")
 
   // boot disk
   disk {
@@ -40,28 +28,6 @@ resource "google_compute_instance_template" "RESOURCE_NAME_instance_template" {
   lifecycle {
     create_before_destroy = true
   }
-  
-  connection {
-    type = "ssh"
-    host = self.network_interface.0.access_config.0.nat_ip
-    user = "dmouhammad"
-    private_key = file("${var.private_key}")
-  }
-
-  provisioner "remote-exec" {
-      inline = [
-          "echo 'Preparing instance configuration...'",
-          "sudo apt update", "sudo apt install python3 -y", "echo Done!"
-      ]
-  }
-  
-  provisioner "local-exec" {
-      command = "echo ${self.network_interface.0.access_config.0.nat_ip} > hosts"
-  } 
-
-  provisioner "local-exec" {
-      command = "ansible-playbook -i hosts --private-key=${var.private_key} ${var.application_type}.yaml"
-  } 
 }
 
 // MANAGED INSTANCE GROUP
@@ -69,6 +35,9 @@ resource "google_compute_instance_group_manager" "RESOURCE_NAME_instance_group" 
   name               = "${var.vm_group_name}-instance-group"
   base_instance_name = var.vm_group_name
   zone               = var.zone
+
+  target_size        = 2
+  // wait_for_instances = true
 
   version {
     instance_template = google_compute_instance_template.RESOURCE_NAME_instance_template.id
@@ -78,7 +47,14 @@ resource "google_compute_instance_group_manager" "RESOURCE_NAME_instance_group" 
     name = "http"
     port = 80
   }
+
+  provisioner "local-exec" {
+    command = "gcloud compute instances list --filter 'name ~ ${var.vm_group_name}-' --format json | jq '[.[] | { name: .name, ip: .networkInterfaces[].accessConfigs[].natIP }]' > RESOURCE_NAME.hosts.json"
+  }
 }
+
+
+/*
 
 // AUTOSCALER
 resource "google_compute_autoscaler" "RESOURCE_NAME_autoscaler" {
@@ -97,6 +73,7 @@ resource "google_compute_autoscaler" "RESOURCE_NAME_autoscaler" {
   }
 }
 
+/*
 // LOAD BALANCER
 module "gce-lb-http" {
   source  = "GoogleCloudPlatform/lb-http/google"
@@ -163,6 +140,9 @@ module "gce-lb-http" {
   }
 }
 
+
 output "RESOURCE_NAME-load-balancer-ip" {
-  value = "${module.gce-lb-http.external_ip}"
+  // value = module.gce-lb-http.external_ip
 }
+
+*/

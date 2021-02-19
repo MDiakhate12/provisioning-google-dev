@@ -1,3 +1,6 @@
+- name: SET UP PUBLIC KEY
+  import_playbook: keys.yaml
+  
 - name: SET UP NGINX
   import_playbook: nginx.yaml
 

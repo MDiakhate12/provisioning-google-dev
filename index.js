@@ -3,6 +3,7 @@ const cors = require('cors');
 
 const PORT = process.env.PORT || 4000;
 
+
 const app = express()
 
 app.use(cors())
@@ -44,6 +45,17 @@ app.post("/", async (req, res) => {
             image_project: osType,
             image_family: osImage,
             application_type: applicationType,
+        }
+
+        if(process.env.USER) {            
+            instance['user'] = process.env.USER
+        }
+
+        if(process.env.KEY_LOCATION) {
+            let keyLocation = process.env.KEY_LOCATION
+
+            instance['private_key'] = keyLocation
+            instance['public_key'] = `${keyLocation}.pub`
         }
 
         let resourceName = vmGroupName.replace('/-/g', '_').trim().toLowerCase()

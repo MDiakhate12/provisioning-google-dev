@@ -140,6 +140,8 @@ app.post("/", async (req, res) => {
                                         await exec(`rm -rf terraform/${file}`)
                                     })
                                     .catch(console.error)
+                            } else {
+                                await exec(`rm -rf terraform/.terraform/`)
                             }
                         })
                     })

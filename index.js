@@ -119,7 +119,7 @@ app.post("/", async (req, res) => {
                     console.log(newVMs)
 
                     // Export the generated terraform directory to template registry
-                    fs.readdir("./terraform/", (err, files) => {
+                    fs.readdir("./terraform/", async (err, files) => {
                         if (err) {
                             console.error(err)
                             return
@@ -130,7 +130,7 @@ app.post("/", async (req, res) => {
                         // Import and remove each file one by one 
                         files.forEach(file => {
                             if (!fs.statSync(`terraform/${file}`).isDirectory()) {
-                                
+
                                 let destination = `${instanceGroupName}-${projectName.replace(/ /g, '-').trim().toLowerCase()}-${timestamp}/${file}`
                                 storage
                                     .bucket(templateRegistry)
@@ -140,10 +140,9 @@ app.post("/", async (req, res) => {
                                         await exec(`rm -rf terraform/${file}`)
                                     })
                                     .catch(console.error)
-                            } else {
-                                await exec(`rm -rf terraform/.terraform/`)
                             }
                         })
+                        await exec(`rm -rf terraform/.terraform`)
                     })
 
                     return res.send(newVMs)

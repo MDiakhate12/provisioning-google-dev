@@ -23,7 +23,7 @@ app.post("/", async (req, res) => {
             connectedApplications,
             costEstimation,
             provider,
-            vmGroupName,
+            instanceGroupName,
             numberOfVm,
             cpu,
             memory,
@@ -38,7 +38,7 @@ app.post("/", async (req, res) => {
 
         let instance = {
             number_of_vm: numberOfVm,
-            vm_group_name: vmGroupName,
+            vm_group_name: instanceGroupName,
             cpu: cpu,
             memory: memory,
             disk_size_gb: disk,
@@ -58,7 +58,7 @@ app.post("/", async (req, res) => {
             instance['public_key'] = `${keyLocation}.pub`
         }
 
-        let resourceName = vmGroupName.replace('/-/g', '_').trim().toLowerCase()
+        let resourceName = instanceGroupName.replace('/-/g', '_').trim().toLowerCase()
 
         const fs = require('fs')
 
@@ -74,6 +74,13 @@ app.post("/", async (req, res) => {
         if (applicationType === "dev" && provider === "gcp" && projectArchitecture === "micro") {
             try {
                 let { stdout: output } = await exec(`make terraform-apply-google RESOURCE_NAME=${resourceName}`)
+                // await exec(`make terraform-apply-google RESOURCE_NAME=${resourceName}`)
+                fs.readFile(`terraform/google/${resourceName}.hosts.json`, (err, data) => {
+                    if(err) {
+                        console.error("Host file not found !")
+                    };
+                    vmResult = JSON.parse(data) 
+                })
                 console.log(output)
             } catch (error) {
                 console.error(error.message)
@@ -82,9 +89,7 @@ app.post("/", async (req, res) => {
             } finally {
                 await exec(`rm terraform/google/${resourceName}*`)
             }
-
-
-            return res.send(instance)
+            return res.send(vmResult)
         } else {
             return res.send("Cannot provide this kind of instance yet.")
         }

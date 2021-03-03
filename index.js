@@ -6,6 +6,17 @@ const PORT = process.env.PORT || 4000;
 
 const app = express()
 
+const templateRepository = 'template_repository';
+const templateRegistry = 'template_registry';
+
+const files = [
+    'terraform/google/mern/dev/template',
+    'terraform/google/mern/dev/variables.tf',
+    'modules/react/dev/init-react.sh',
+    'modules/nodejs/dev/init-nodejs.sh',
+    'modules/mongodb/init-mongodb.sh',
+]
+
 app.use(cors())
 app.use(express.json())
 
@@ -47,52 +58,100 @@ app.post("/", async (req, res) => {
             application_type: applicationType,
         }
 
-        if(process.env.USER) {            
+        if (process.env.USER) {
             instance['user'] = process.env.USER
         }
 
-        if(process.env.KEY_LOCATION) {
+        if (process.env.KEY_LOCATION) {
             let keyLocation = process.env.KEY_LOCATION
 
             instance['private_key'] = keyLocation
             instance['public_key'] = `${keyLocation}.pub`
         }
 
-        let resourceName = instanceGroupName.replace('/-/g', '_').trim().toLowerCase()
+        let resourceName = instanceGroupName.replace(/-/g, '_').trim().toLowerCase()
 
-        const fs = require('fs')
+        // Imports the Google Cloud client library
+        const { Storage } = require('@google-cloud/storage');
 
-        fs.writeFile(`terraform/google/${resourceName}.auto.tfvars.json`, JSON.stringify(instance), (err) => {
-            if (err) {
-                console.error(err.message)
+        // Creates a client
+        const storage = new Storage();
+
+        // Download the files
+        files.map(async (file) => {
+            let destination = `./terraform/${file.substring(file.lastIndexOf("/") + 1, file.length)}`
+            try {
+                await storage.bucket(templateRepository).file(file).download({ destination })
+                console.log(`gs://${templateRepository}/${file} downloaded to ${destination}.`)
             }
-            else {
-                console.log(`Created file ${resourceName}.auto.tfvars.json from request...`)
+            catch (error) {
+                console.error(error)
             }
         })
 
-        if (applicationType === "dev" && provider === "gcp" && projectArchitecture === "micro") {
-            try {
-                let { stdout: output } = await exec(`make terraform-apply-google RESOURCE_NAME=${resourceName}`)
-                // await exec(`make terraform-apply-google RESOURCE_NAME=${resourceName}`)
-                fs.readFile(`terraform/google/${resourceName}.hosts.json`, (err, data) => {
-                    if(err) {
-                        console.error("Host file not found !")
-                    };
-                    vmResult = JSON.parse(data) 
+        // Wait 3 seconds for the dowload
+        setTimeout(async () => {
+            const fs = require('fs')
+
+            // Create variable file
+            fs.writeFileSync(`./terraform/${resourceName}.auto.tfvars.json`, JSON.stringify(instance))
+            console.log(`Created file ${resourceName}.auto.tfvars.json from request...`)
+
+            // Execute Terraform
+            exec(`make terraform-apply RESOURCE_NAME=${resourceName}`)
+
+                // When success
+                .then(async ({ stdout, stderr }) => {
+
+                    // Log output
+                    console.log(stdout)
+                    console.log(stderr)
+
+                    // List VMs instances and their public IPs
+                    const Compute = require('@google-cloud/compute')
+
+                    const compute = new Compute()
+
+                    let data = await compute.getVMs({ filter: `name eq ^${instanceGroupName}.*` })
+                    let vms = data[0].map(element => element.metadata)
+                    let newVMs = vms.map(({ name, networkInterfaces }) => ({ name, publicIP: networkInterfaces[0].accessConfigs[0].natIP }))
+
+                    console.log(newVMs)
+
+                    // Export the generated terraform directory to template registry
+                    fs.readdir("./terraform/", (err, files) => {
+                        if (err) {
+                            console.error(err)
+                            return
+                        }
+
+                        let timestamp = Date.now()
+
+                        // Import and remove each file one by one 
+                        files.forEach(file => {
+                            if (!fs.statSync(`terraform/${file}`).isDirectory()) {
+                                
+                                let destination = `${instanceGroupName}-${projectName.replace(/ /g, '-').trim().toLowerCase()}-${timestamp}/${file}`
+                                storage
+                                    .bucket(templateRegistry)
+                                    .upload(`terraform/${file}`, { destination })
+                                    .then(async (uploadedFile) => {
+                                        console.log(`${file} uploaded successfuly`)
+                                        await exec(`rm -rf terraform/${file}`)
+                                    })
+                                    .catch(console.error)
+                            }
+                        })
+                    })
+
+                    return res.send(newVMs)
+
                 })
-                console.log(output)
-            } catch (error) {
-                console.error(error.message)
-                let { stdout: output } = await exec(`cd terraform/google && terraform destroy -auto-approve -state=${resourceName}.tfstate`)
-                console.log(output)
-            } finally {
-                await exec(`rm terraform/google/${resourceName}*`)
-            }
-            return res.send(vmResult)
-        } else {
-            return res.send("Cannot provide this kind of instance yet.")
-        }
+                .catch(error => {
+                    console.error(error)
+                    return res.status(500).send("Error during creation.")
+                })
+        }, 3000);
     } catch (error) {
         console.error(error.message)
     }

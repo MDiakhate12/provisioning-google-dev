@@ -1,8 +1,13 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs')
+const Compute = require('@google-cloud/compute');
+const { Storage } = require('@google-cloud/storage');
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
 
 const PORT = process.env.PORT || 4000;
-
+const WAIT_BEFORE_EXECUTE = 3000; // wait 6 seconds
 
 const app = express()
 
@@ -21,143 +26,167 @@ app.use(cors())
 app.use(express.json())
 
 app.post("/", async (req, res) => {
+
     try {
 
         const {
-            projectName,
-            projectArchitecture,
-            applicationType,
-            environment,
-            SLA,
-            dataSize,
-            dependencies,
-            connectedApplications,
-            costEstimation,
-            provider,
             instanceGroupName,
-            numberOfVm,
-            cpu,
-            memory,
-            disk,
-            osType,
-            osImage,
+            projectName,
         } = req.body
 
-        const util = require('util')
-
-        const exec = util.promisify(require('child_process').exec);
-
-        let instance = {
-            number_of_vm: numberOfVm,
-            vm_group_name: instanceGroupName,
-            cpu: cpu,
-            memory: memory,
-            disk_size_gb: disk,
-            image_project: osType,
-            image_family: osImage,
-            application_type: applicationType,
-        }
-
-        if (process.env.USER) {
-            instance['user'] = process.env.USER
-        }
-
-        if (process.env.KEY_LOCATION) {
-            let keyLocation = process.env.KEY_LOCATION
-
-            instance['private_key'] = keyLocation
-            instance['public_key'] = `${keyLocation}.pub`
-        }
-
+        // Replace hyphens by underscores
         let resourceName = instanceGroupName.replace(/-/g, '_').trim().toLowerCase()
-
-        // Imports the Google Cloud client library
-        const { Storage } = require('@google-cloud/storage');
-
-        // Creates a client
-        const storage = new Storage();
+        // let folders = "backend"
+        let timestamp = Date.now()
 
         // Download the files
-        files.map(async (file) => {
-            let destination = `./terraform/${file.substring(file.lastIndexOf("/") + 1, file.length)}`
-            try {
-                await storage.bucket(templateRepository).file(file).download({ destination })
-                console.log(`gs://${templateRepository}/${file} downloaded to ${destination}.`)
-            }
-            catch (error) {
-                console.error(error)
-            }
-        })
+        downloadFiles(files, "./terraform/")
+
 
         // Wait 3 seconds for the dowload
-        setTimeout(async () => {
-            const fs = require('fs')
+        setTimeout(() => {
 
-            // Create variable file
-            fs.writeFileSync(`./terraform/${resourceName}.auto.tfvars.json`, JSON.stringify(instance))
-            console.log(`Created file ${resourceName}.auto.tfvars.json from request...`)
+            createTerraformVariableFile(req.body, resourceName)
 
-            // Execute Terraform
-            exec(`make terraform-apply RESOURCE_NAME=${resourceName}`)
-
-                // When success
-                .then(async ({ stdout, stderr }) => {
-
-                    // Log output
-                    console.log(stdout)
-                    console.log(stderr)
-
-                    // List VMs instances and their public IPs
-                    const Compute = require('@google-cloud/compute')
-
-                    const compute = new Compute()
-
-                    let data = await compute.getVMs({ filter: `name eq ^${instanceGroupName}.*` })
-                    let vms = data[0].map(element => element.metadata)
-                    let newVMs = vms.map(({ name, networkInterfaces }) => ({ name, publicIP: networkInterfaces[0].accessConfigs[0].natIP }))
-
-                    console.log(newVMs)
-
+            executeTerraform(resourceName)
+                .then(async () => {
                     // Export the generated terraform directory to template registry
-                    fs.readdir("./terraform/", async (err, files) => {
-                        if (err) {
-                            console.error(err)
-                            return
-                        }
+                    uploadFiles(projectName, instanceGroupName, timestamp)
 
-                        let timestamp = Date.now()
-
-                        // Import and remove each file one by one 
-                        files.forEach(file => {
-                            if (!fs.statSync(`terraform/${file}`).isDirectory()) {
-
-                                let destination = `${instanceGroupName}-${projectName.replace(/ /g, '-').trim().toLowerCase()}-${timestamp}/${file}`
-                                storage
-                                    .bucket(templateRegistry)
-                                    .upload(`terraform/${file}`, { destination })
-                                    .then(async (uploadedFile) => {
-                                        console.log(`${file} uploaded successfuly`)
-                                        await exec(`rm -rf terraform/${file}`)
-                                    })
-                                    .catch(console.error)
-                            }
-                        })
-                        await exec(`rm -rf terraform/.terraform`)
-                    })
-
-                    return res.send(newVMs)
-
+                    // Get VM Instances
+                    getInstances(instanceGroupName)
+                        .then(instances => {
+                            console.log(instances)
+                            res.send(instances)
+                        }).catch(console.error)
                 })
-                .catch(error => {
-                    console.error(error)
-                    return res.status(500).send("Error during creation.")
-                })
-        }, 3000);
+                .catch((error) => { console.error(error); res.status(500).send("Error during creation.") })
+
+        }, WAIT_BEFORE_EXECUTE);
+
     } catch (error) {
-        console.error(error.message)
+        console.error(error)
+        res.status(500).send("Server error.")
+
     }
 
 })
+
+const downloadFiles = (files, path) => {
+
+    // Creates a client
+    const storage = new Storage();
+
+    files.map(async (file) => {
+        let destination = `${path}/${file.substring(file.lastIndexOf("/") + 1)}`
+        try {
+            await storage.bucket(templateRepository).file(file).download({ destination })
+            console.log(`gs://${templateRepository}/${file} downloaded to ${destination}.`)
+        }
+        catch (error) {
+            console.error(error)
+        }
+    })
+}
+
+const uploadFiles = async (projectName, instanceGroupName, timestamp) => {
+
+    const storage = new Storage();
+
+    let path = `terraform`
+
+    return fs.readdir(path, async (err, files) => {
+        if (err) {
+            console.error(err)
+            return
+        }
+
+        console.log("TIMESTAMP:", timestamp)
+
+        // Import and remove each file one by one 
+        files.forEach(file => {
+            if (!fs.statSync(`${path}/${file}`).isDirectory()) {
+                let destination = `${instanceGroupName}-${timestamp}/${file}`
+                storage
+                    .bucket(templateRegistry)
+                    .upload(`${path}/${file}`, { destination })
+                    .then(async () => {
+                        console.log(`${file} uploaded successfuly`)
+                        exec(`rm -rf ${path}/${file}`)
+                            .then((() => console.log(`Deleted ${file}.`)))
+                            .catch(console.error)
+                    })
+                    .catch(console.error)
+            }
+        })
+        exec(`rm -rf ${path}/.terraform`)
+            .then((() => console.log("Deleted .terraform plugin folder.")))
+            .catch(console.error)
+    })
+
+}
+
+const getInstances = async (prefix) => {
+    const compute = new Compute()
+    return compute
+        .getVMs({ filter: `name eq ^${prefix}.*` })
+        .then(data => {
+
+            let vms = data[0].map(element => element.metadata)
+            let newVMs = vms.map(({ name, networkInterfaces }) => ({
+                name,
+                publicIP: networkInterfaces[0].accessConfigs[0].natIP,
+                privateIP: networkInterfaces[0].networkIP
+            }))
+
+            // console.log(newVMs)
+
+            return newVMs;
+        })
+        .catch(console.error)
+}
+
+const createTerraformVariableFile = async (body, resourceName) => {
+
+    const { numberOfVm, instanceGroupName, cpu, memory, disk, osType, osImage, applicationType } = body
+
+    let instance = {
+        number_of_vm: numberOfVm,
+        vm_group_name: instanceGroupName,
+        cpu: cpu,
+        memory: memory,
+        disk_size_gb: disk,
+        image_project: osType,
+        image_family: osImage,
+        application_type: applicationType,
+    }
+
+    if (process.env.USER) {
+        instance['user'] = process.env.USER
+    }
+
+    fs.writeFileSync(`terraform/${resourceName}.auto.tfvars.json`, JSON.stringify(instance))
+    console.log(`Created file terraform/${resourceName}.auto.tfvars.json from request...`)
+}
+
+const executeTerraform = async (resourceName) => {
+
+        return exec(`make terraform-apply RESOURCE_NAME=${resourceName}`)
+
+            // When success
+            .then(async ({ stdout, stderr, error }) => {
+                if (error) { console.error(error); return }
+
+                // Log output
+                if (stderr) console.log(`stderr: ${stderr}`)
+                if (stdout) console.log(`stdout: ${stdout}`)
+                return  
+            })
+            .catch(error => {
+                console.error(error)
+                return
+            })
+}
 
 app.listen(PORT, () => {
     console.log('Listenning on port: ', PORT)

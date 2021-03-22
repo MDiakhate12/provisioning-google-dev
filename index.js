@@ -43,7 +43,7 @@ app.post("/", async (req, res) => {
       case "sbam":
         modules = {
           frontend: "modules/angular/dev/init-angular.sh",
-          backend: "modules/springboot/dev/init-spring-boot.sh",
+          backend: "modules/springboot/dev/init-springboot.sh",
           database: "modules/mysql/init-mysql.sh",
         };
         break;

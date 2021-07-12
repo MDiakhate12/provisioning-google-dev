@@ -67,7 +67,7 @@ app.post("/", async (req, res) => {
     // Download the files
     downloadFiles(files, "./terraform/");
 
-    // Wait 3 seconds for the dowload
+    // Wait 3 seconds for the download
     setTimeout(() => {
       createTerraformVariableFile(req.body, modules);
 
